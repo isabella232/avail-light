@@ -2,7 +2,7 @@ extern crate futures;
 extern crate num_cpus;
 
 use std::{
-	collections::{HashMap, HashSet},
+	collections::HashSet,
 	sync::{Arc, Mutex},
 	time::SystemTime,
 };
@@ -124,7 +124,9 @@ pub async fn get_block_by_number(url: &str, block: u64) -> Result<Block> {
 }
 
 pub fn generate_random_cells(max_rows: u16, max_cols: u16, block: u64) -> Vec<Cell> {
-	let count: u16 = if max_rows * max_cols < 8 {
+	let max_cells = (max_rows as u32) * (max_cols as u32);
+	let count: u16 = if max_cells < 8 {
+		// Multiplication cannot overflow since result is less than 8
 		max_rows * max_cols
 	} else {
 		8
@@ -224,8 +226,8 @@ pub async fn get_cells(
 ) -> Result<Vec<Option<Vec<u8>>>, String> {
 	let begin = SystemTime::now();
 
-	let store_size = (msg.max_rows * msg.max_cols) as usize;
-	let store: Arc<Mutex<Vec<Option<Vec<u8>>>>> = Arc::new(Mutex::new(vec![None; store_size]));
+	let max_cells = (msg.max_rows as usize) * (msg.max_cols as usize);
+	let store: Arc<Mutex<Vec<Option<Vec<u8>>>>> = Arc::new(Mutex::new(vec![None; max_cells]));
 
 	let store_0 = store.clone();
 	let cells_and_store = cells
@@ -237,7 +239,7 @@ pub async fn get_cells(
 			let proof = get_kate_query_proof_by_cell(url, msg.num, row as u16, col as u16).await;
 
 			let mut handle = store.lock().unwrap();
-			handle[col * msg.max_rows as usize + row] = match proof {
+			handle[col * (msg.max_rows as usize) + row] = match proof {
 				Ok(v) => Some(v),
 				Err(e) => {
 					log::info!("error: {}", e);
@@ -249,7 +251,7 @@ pub async fn get_cells(
 
 	log::info!(
 		"Received {} cells of block {}\t{:?}",
-		msg.max_cols * msg.max_rows,
+		max_cells,
 		msg.num,
 		begin.elapsed().unwrap()
 	);
@@ -308,46 +310,36 @@ pub async fn get_kate_proof(url: &str, block_num: u64, mut cells: Vec<Cell>) -> 
 	Ok(cells)
 }
 
-pub fn generate_app_specific_cells(
-	index: u32,
-	max_col: u16,
-	num: u64,
-	header: Header,
-	id: u32,
-) -> Vec<Cell> {
-	let mut buf = Vec::new();
-	let hash_ind = get_id_specific_size(header);
-	let endsize = hash_ind.get(&id).unwrap();
+//rpc- only for checking the connecting to substrate node
+pub async fn get_chain(url: &str) -> Result<String> {
+	let payload: String =
+		format!(r#"{{"id": 1, "jsonrpc": "2.0", "method": "system_chain", "params": []}}"#);
 
-	(index..*endsize).for_each(|index| {
-		let rows = (index) as u16 / max_col;
-		let cols = (index) as u16 % max_col;
+	let req = hyper::Request::builder()
+		.method(hyper::Method::POST)
+		.uri(url)
+		.header("Content-Type", "application/json")
+		.body(hyper::Body::from(payload))
+		.context("failed to build HTTP POST request object(get_chain)")?;
 
-		buf.push(Cell {
-			block: num,
-			row: rows as u16,
-			col: cols as u16,
-			..Default::default()
-		});
-	});
-	buf
-}
-
-pub fn get_id_specific_size(block_header: Header) -> HashMap<u32, u32> {
-	let app_index = block_header.app_data_lookup.index;
-	let app_size = block_header.app_data_lookup.size;
-	let mut index: HashMap<u32, u32> = HashMap::new();
-	for i in 0..app_index.len() {
-		if i + 1 == app_index.len() {
-			let esize = app_size;
-			index.insert(app_index[i].0, esize);
-		} else {
-			let size = app_index[i + 1].1 - 1;
-			index.insert(app_index[i].0, size);
-		}
+	let resp = if is_secure(url) {
+		let https = HttpsConnector::new();
+		let client = hyper::Client::builder().build::<_, hyper::Body>(https);
+		client.request(req).await
+	} else {
+		let client = hyper::Client::new();
+		client.request(req).await
 	}
-	index
+	.context("failed to build HTTP POST request object(get_chain)")?;
+
+	let body = hyper::body::to_bytes(resp.into_body())
+		.await
+		.context("failed to build HTTP POST request object(get_chain)")?;
+	let r: GetChainResponse = serde_json::from_slice(&body)
+		.context("failed to build HTTP POST request object(get_chain)")?;
+	Ok(r.result)
 }
+
 //parsing the urls given in the vector of urls
 pub fn parse_urls(urls: Vec<String>) -> Result<Vec<url::Url>> {
 	urls.iter()
@@ -373,30 +365,26 @@ pub async fn check_connection(
 pub async fn check_http(full_node_rpc: Vec<String>) -> Result<String> {
 	let mut rpc_url = String::new();
 	for x in full_node_rpc.iter() {
-		let url_ = x.parse::<hyper::Uri>().context("http url parse failed")?;
-		if is_secure(x) {
-			let https = HttpsConnector::new();
-			let client = hyper::Client::builder().build::<_, hyper::Body>(https);
-			let res = match client.get(url_).await {
-				Ok(c) => c,
-				Err(_) => continue,
-			};
-			if res.status().is_success() {
-				rpc_url.push_str(x);
-				break;
-			}
-		} else {
-			let client = hyper::Client::new();
-			let _res = match client.get(url_).await {
-				Ok(c) => c,
-				Err(_) => continue,
-			};
-			//@TODO: need to find an alternative way for http part
-			if let Ok(_v) = get_chain_header(x).await {
-				rpc_url.push_str(x);
-				break;
-			}
+		if let Ok(_v) = get_chain(x).await {
+			rpc_url.push_str(x);
+			break;
 		}
 	}
 	Ok(rpc_url)
+}
+
+fn from_kate_cell(block: u64, cell: &kate_recovery::com::Cell) -> Cell {
+	Cell {
+		block,
+		row: cell.row,
+		col: cell.col,
+		proof: cell.data.to_vec(),
+	}
+}
+
+pub fn from_kate_cells(block: u64, cells: &[kate_recovery::com::Cell]) -> Vec<Cell> {
+	cells
+		.iter()
+		.map(|cell| from_kate_cell(block, cell))
+		.collect::<Vec<Cell>>()
 }

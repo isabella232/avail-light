@@ -1,8 +1,11 @@
-# avail-light
+<div align="Center">
+<h1>avail-light</h1>
+<h3> Light client for the Polygon Avail blockchain</h3>
+</div>
+
+<br>
 
 [![Build status](https://github.com/maticnetwork/avail-light/actions/workflows/default.yml/badge.svg)](https://github.com/maticnetwork/avail-light/actions/workflows/default.yml) [![Code coverage](https://codecov.io/gh/maticnetwork/avail-light/branch/main/graph/badge.svg?token=7O2EA7QMC2)](https://codecov.io/gh/maticnetwork/avail-light)
-
-Light client for Data Availability Blockchain of Polygon 💻
 
 ![demo](./img/prod_demo.png)
 
@@ -21,8 +24,13 @@ Naive approach for building one AVAIL light client, which will do following
 
 ## Installation
 
-- First clone this repo in your local setup
-- Create one yaml configuration file in root of project & put following content
+Start by cloning this repo in your local setup:
+
+```ssh
+git clone git@github.com:maticnetwork/avail-light.git
+```
+
+Create one yaml configuration file in the root of the project & put following content:
 
 ```bash
 touch config.yaml
@@ -52,7 +60,7 @@ bootstraps = [["12D3KooWMm1c4pzeLPGkkCJMAgFbsfQ8xmVDusg272icWsaNHWzN", "/ip4/127
 log_level = "INFO"
 ```
 
-- Now, let's run client
+Now, run the client:
 
 ```bash
 cargo run -- -c config.yaml  
@@ -60,11 +68,13 @@ cargo run -- -c config.yaml
 
 ## Usage
 
-Given block number ( as _(hexa-)_ decimal number ) returns confidence obtained by light client for this block
+Given a block number (as _(hexa-)_ decimal number), return confidence obtained by the light client for this block:
 
 ```bash
-curl -s localhost:7000/v1/confidence/ _block-number_
+curl -s localhost:7000/v1/confidence/ <block-number>
 ```
+
+Result:
 
 ```json
 {
@@ -74,26 +84,24 @@ curl -s localhost:7000/v1/confidence/ _block-number_
 }
 ```
 
----
+>  `serialisedConfidence` is calculated as: 
+> `blockNumber << 32 | int32(confidence * 10 ** 7)`, where confidence is represented out of 10 ** 9.
 
-**Note :** Serialised confidence calculated as: 
-> `blockNumber << 32 | int32(confidence * 10 ** 7)`, where confidence is represented as out of 10 ** 9
-
-## Test code coverage report
+## Test Code Coverage Report
 
 We are using [grcov](https://github.com/mozilla/grcov) to aggregate code coverage information and generate reports.
 
-To install grcov run
+To install grcov, run:
 
 	$> cargo install grcov
 
-Source code coverage data is generated when running tests with
+Source code coverage data is generated when running tests with:
 
 	$> env RUSTFLAGS="-C instrument-coverage" \
 		LLVM_PROFILE_FILE="tests-coverage-%p-%m.profraw" \
 		cargo test
 
-To generate report, run
+To generate the report, run:
 
 	$> grcov . -s . \
 		--binary-path ./target/debug/ \
@@ -102,10 +110,8 @@ To generate report, run
 		--ignore-not-existing -o \
 		./target/debug/coverage/
 
-To clean up generate coverage information files, run
+To clean up generate coverage information files, run:
 
 	$> find . -name \*.profraw -type f -exec rm -f {} +
 
-Open `index.html` from `./target/debug/coverage/` folder to review coverage data.
-
-
+Open `index.html` from the `./target/debug/coverage/` folder to review coverage data.
